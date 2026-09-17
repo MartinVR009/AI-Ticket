@@ -1,0 +1,79 @@
+services:
+  # ==========================================
+  # 1. Base de Datos: PostgreSQL Nativo
+  # ==========================================
+  db:
+    image: postgres:16-alpine
+    container_name: ai_ticket_db
+    restart: always
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      POSTGRES_DB: ${DB_NAME:-tickets}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/src/infrastructure/database/postgres/db.sql:/docker-entrypoint-initdb.d/01-db.sql:ro
+      - ./backend/src/infrastructure/database/postgres/db.seed.sql:/docker-entrypoint-initdb.d/02-seed.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d tickets"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ai_ticket_network
+
+  # ==========================================
+  # 2. Servidor Backend: Node.js + GraphQL
+  # ==========================================
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: ai_ticket_backend
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PORT: 4000
+      NODE_ENV: production
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      DB_NAME: ${DB_NAME:-tickets}
+      FRONTEND_URL: http://localhost:3000
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_PROJECT_NAME: ${GEMINI_PROJECT_NAME:-}
+      GEMINI_PROJECT_NUMBER: ${GEMINI_PROJECT_NUMBER:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-flash-latest}
+    ports:
+      - "4000:4000"
+    networks:
+      - ai_ticket_network
+
+  # ==========================================
+  # 3. Aplicación Frontend: React + Nginx
+  # ==========================================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: ai_ticket_frontend
+    restart: always
+    depends_on:
+      - backend
+    ports:
+      - "3000:80"
+    networks:
+      - ai_ticket_network
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  ai_ticket_network:
+    driver: bridge
